@@ -1,0 +1,64 @@
+services:
+  # --- API ---
+  api:
+    container_name: ${PROJECT_NAME}-api
+    env_file:
+      - ./api/.env
+
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+
+    volumes:
+      - ./api:/app
+
+    ports:
+      - "${API_PORT}:${API_PORT}"
+
+    networks:
+      - internal
+    restart: unless-stopped
+
+  # --- FRONTEND ---
+  frontend:
+    container_name: ${PROJECT_NAME}-frontend
+    env_file:
+      - ./www/.env
+
+    build:
+      context: ./www
+      dockerfile: Dockerfile.dev
+
+    volumes:
+      - ./www:/app
+
+    ports:
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
+
+    networks:
+      - internal
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  # POSTGRESQL (optional — add when your app needs it)
+  postgres:
+    image: postgres:17
+    container_name: ${PROJECT_NAME}-postgres
+    profiles:
+      - with-db
+    ports:
+      - 5432:5432
+    volumes:
+      - ./data/psql:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    networks:
+      - internal
+
+networks:
+  internal:
+    name: ${PROJECT_NAME}
+    driver: bridge

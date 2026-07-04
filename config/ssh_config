@@ -1,0 +1,14 @@
+Host staging
+    HostName {STAGING_IP}
+    IdentityFile ~/.ssh/deploy_key
+    User deploy
+
+Host web-1
+    HostName {WEB1_IP}
+    IdentityFile ~/.ssh/deploy_key
+    User deploy
+
+Host web-2
+    HostName {WEB2_IP}
+    IdentityFile ~/.ssh/deploy_key
+    User deploy

@@ -1,0 +1,63 @@
+apiVersion: v1
+items:
+  # --- API ---
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: api
+      namespace: project
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: api
+      template:
+        metadata:
+          labels:
+            app: api
+        spec:
+          containers:
+            - image: user/api:0.0.0
+              imagePullPolicy: IfNotPresent
+              name: api
+              ports:
+                - containerPort: 5000
+              envFrom:
+                - configMapRef:
+                    name: project-config
+
+          imagePullSecrets:
+            - name: regcred
+
+  # --- FRONTEND ---
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: frontend
+      namespace: project
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: frontend
+      template:
+        metadata:
+          labels:
+            app: frontend
+        spec:
+          containers:
+            - image: user/frontend:0.0.0
+              imagePullPolicy: IfNotPresent
+              name: frontend
+              ports:
+                - containerPort: 4000
+              envFrom:
+                - configMapRef:
+                    name: project-config
+
+          imagePullSecrets:
+            - name: regcred
+
+kind: List
+metadata:
+  resourceVersion: ""

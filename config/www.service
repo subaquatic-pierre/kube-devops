@@ -1,0 +1,43 @@
+[Unit]
+Description=Project Frontend (Docker)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Environment=DOCKER_CONFIG=/etc/docker
+EnvironmentFile=/etc/default/www
+
+# Always restart the service if it exits
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+
+# Clean up any old container and pull the latest image (optional)
+# IMAGE can be set in /etc/default/www, otherwise fallback below
+ExecStartPre=-/usr/bin/docker stop www
+ExecStartPre=-/usr/bin/docker rm www
+ExecStartPre=/usr/bin/docker pull ${IMAGE}
+
+# Start the container (no --restart here; let systemd manage restarts)
+ExecStart=/usr/bin/docker run \
+  --name www \
+  --env-file /etc/default/www \
+  --network host \
+  --log-driver=journald \
+  --log-opt tag="{{.Name}}" \
+  --memory=2g \
+  --ulimit nofile=65535:65535 \
+  -e NODE_OPTIONS="--max-old-space-size=1536" \
+  ${IMAGE} 
+
+# Graceful stop
+ExecStop=/usr/bin/docker stop -t 30 www
+
+# Optional: send SIGHUP to pid 1 in the container on reload
+ExecReload=/usr/bin/docker exec www kill -HUP 1
+
+# Improves logging visibility in journalctl
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

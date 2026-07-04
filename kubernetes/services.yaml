@@ -1,0 +1,39 @@
+apiVersion: v1
+items:
+  # --- API SERVICE ---
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      labels:
+        app: api
+      name: api
+      namespace: project
+    spec:
+      ports:
+        - port: 5000
+          protocol: TCP
+          targetPort: 5000
+      selector:
+        app: api
+      type: ClusterIP
+
+  # --- FRONTEND SERVICE ---
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      labels:
+        app: frontend
+      name: frontend
+      namespace: project
+    spec:
+      ports:
+        - port: 4000
+          protocol: TCP
+          targetPort: 4000
+      selector:
+        app: frontend
+      type: ClusterIP
+
+kind: List
+metadata:
+  resourceVersion: ""

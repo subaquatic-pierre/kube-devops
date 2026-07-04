@@ -1,0 +1,2 @@
+# IMAGE to run
+IMAGE=user/frontend:0.0.0
