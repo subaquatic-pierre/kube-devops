@@ -22,10 +22,11 @@ Thumbs.db
 *.swp
 *.swo
 
-# Environment
-.env.local
-.env.production.local
-.env.development.local
+# Local env files (may contain secrets — never commit)
+.env
+
+# Deployment env files are okay (ports, example URLs)
+# .env.prod and .env.staging are tracked
 
 # SQLite
 *.db
