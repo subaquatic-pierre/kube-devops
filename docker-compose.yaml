@@ -1,0 +1,223 @@
+services:
+  # --- PROMETHEUS ---
+  prometheus:
+    container_name: ${PROJECT_NAME}-prometheus
+    image: prom/prometheus
+    user: "1000"
+    command:
+      [
+        "--log.level=debug",
+        "--config.file=/etc/prometheus/prometheus.yaml",
+        "--enable-feature=remote-write-receiver",
+        "--query.lookback-delta=30s",
+      ]
+    ports:
+      - 9090:9090
+    volumes:
+      - ./config/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml
+      - ./data/prometheus:/prometheus
+    networks:
+      - kube-devops
+
+  # --- GRAFANA ---
+  grafana:
+    container_name: ${PROJECT_NAME}-grafana
+    image: grafana/grafana
+    user: "1000"
+    ports:
+      - 3000:3000
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWD}
+    volumes:
+      - ./config/grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./data/grafana:/var/lib/grafana
+    networks:
+      - kube-devops
+
+  # --- LOKI ---
+  loki-read:
+    image: grafana/loki:latest
+    command: "-config.file=/etc/loki/config.yaml -target=read -query-scheduler.use-scheduler-ring=false"
+    ports:
+      - 3101:3100
+      - 7946
+      - 9095
+    volumes:
+      - ./config/loki/loki.yaml:/etc/loki/config.yaml
+    depends_on:
+      - minio
+    networks:
+      - kube-devops
+    healthcheck:
+      test: ["CMD", "/usr/bin/loki", "-health"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  loki-write:
+    image: grafana/loki:latest
+    command: "-config.file=/etc/loki/config.yaml -target=write"
+    ports:
+      - 3102:3100
+      - 7946
+      - 9095
+    volumes:
+      - ./config/loki/loki.yaml:/etc/loki/config.yaml
+    depends_on:
+      - minio
+    networks:
+      - kube-devops
+    healthcheck:
+      test: ["CMD", "/usr/bin/loki", "-health"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  loki-backend:
+    image: grafana/loki:latest
+    command: "-config.file=/etc/loki/config.yaml -target=backend -legacy-read-mode=false"
+    ports:
+      - "3100"
+      - "7946"
+    volumes:
+      - ./config/loki/loki.yaml:/etc/loki/config.yaml
+    depends_on:
+      - minio
+      - loki-nginx
+    networks:
+      - kube-devops
+    healthcheck:
+      test: ["CMD", "/usr/bin/loki", "-health"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- NGINX LOKI ---
+  loki-nginx:
+    container_name: ${PROJECT_NAME}-loki-nginx
+    image: nginx:latest
+    volumes:
+      - ./config/nginx/loki-nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - "3100:3100"
+    networks:
+      - kube-devops
+    depends_on:
+      - loki-read
+      - loki-write
+    healthcheck:
+      test: ["CMD", "service", "nginx", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- ALLOY ---
+  alloy:
+    image: grafana/alloy:latest
+    volumes:
+      - ./config/alloy/alloy.config:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
+    ports:
+      - 12345:12345
+    depends_on:
+      - loki-nginx
+    networks:
+      - kube-devops
+
+  # --- MINIO (S3 Compatible Storage) ---
+  minio:
+    image: minio/minio
+    user: "1000"
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /data/loki-data && \
+        mkdir -p /data/loki-ruler &&
+        minio server --address "0.0.0.0:9000" --console-address "0.0.0.0:9001" /data
+    environment:
+      - MINIO_ROOT_USER=loki
+      - MINIO_ROOT_PASSWORD=supersecret
+      - MINIO_PROMETHEUS_AUTH_TYPE=public
+      - MINIO_UPDATE=off
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./data/minio:/data
+    networks:
+      - kube-devops
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- LOG GENERATOR ---
+  # for testing purposes only, disable in production
+  # flog:
+  #   image: mingrammer/flog
+  #   command: -f json -d 200ms -l
+  #   networks:
+  #     - kube-devops
+
+  # --- TEMPLATE APPS ---
+
+  # --- API ---
+  # api:
+  #   container_name: ${PROJECT_NAME}-api
+  #   env_file:
+  #     - ./api/.env
+  #   build:
+  #     context: ./api
+  #     dockerfile: Dockerfile.dev
+  #   volumes:
+  #     - ./api:/app
+  #   ports:
+  #     - "${API_PORT}:${API_PORT}"
+  #   networks:
+  #     - kube-devops
+
+  # --- FRONTEND ---
+  # frontend:
+  #   container_name: ${PROJECT_NAME}-frontend
+  #   env_file:
+  #     - ./www/.env
+  #   build:
+  #     context: ./www
+  #     dockerfile: Dockerfile.dev
+  #   volumes:
+  #     - ./www:/app
+  #   ports:
+  #     - "${FRONTEND_PORT}:${FRONTEND_PORT}"
+
+  #   networks:
+  #     - kube-devops
+  #   depends_on:
+  #     - api
+
+  # --- POSTGRESQL ---
+  # postgres:
+  #   container_name: ${PROJECT_NAME}-postgres
+  #   image: postgres:17
+  #   ports:
+  #     - 5432:5432
+  #   volumes:
+  #     - ./data/psql:/var/lib/postgresql/data
+  #   environment:
+  #     POSTGRES_USER: ${DB_USER}
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #     POSTGRES_DB: ${DB_NAME}
+  #   networks:
+  #     - kube-devops
+
+networks:
+  kube-devops:
+    name: ${PROJECT_NAME}
+    driver: bridge
