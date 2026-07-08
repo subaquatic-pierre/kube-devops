@@ -37,3 +37,7 @@ data/
 
 **/*.tfvars
 **/.terraform
+
+
+**/*.env*
+!**/*.env.example
