@@ -1,4 +1,64 @@
 services:
+  # --- ALLOY ---
+  # Grafana Alloy batches and processes traces sent to it, generating
+  # auto-logs from those traces.
+  # Includes Metrics, Logs, Traces and Profiles.
+  alloy:
+    image: grafana/alloy:v1.8.1
+    container_name: ${PROJECT_NAME}-alloy
+    ports:
+      - "12347:12345"
+      - "12348:12348"
+      - "6832:6832"
+      - "55679:55679"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./config/alloy:/etc/alloy
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      [
+        "run",
+        "--server.http.listen-addr=0.0.0.0:12345",
+        "--stability.level=experimental",
+        "/etc/alloy/config.alloy",
+      ]
+    networks:
+      - kube-devops
+
+  # --- GRAFANA ---
+  # The Grafana dashboard
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: ${PROJECT_NAME}-grafana
+    user: "1000"
+    ports:
+      - 3000:3000
+    environment:
+      - GF_FEATURE_TOGGLES_ENABLE=flameGraph traceqlSearch traceQLStreaming correlations metricsSummary traceqlEditor traceToMetrics traceToProfiles datatrails
+      - GF_INSTALL_PLUGINS=grafana-lokiexplore-app,grafana-exploretraces-app,grafana-pyroscope-app
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWD}
+    volumes:
+      - ./config/grafana/definitions:/var/lib/grafana/dashboards
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./data/grafana:/var/lib/grafana
+    networks:
+      - kube-devops
+
+  # --- MIMIR ---
+  # mimir:
+  #   image: grafana/mimir:2.15.0
+  #   command:
+  #     [
+  #       "-ingester.native-histograms-ingestion-enabled=true",
+  #       "-config.file=/etc/mimir.yaml",
+  #     ]
+  #   ports:
+  #     - "9009:9009"
+  #   volumes:
+  #     - "./mimir/mimir.yaml:/etc/mimir.yaml"
+
   # --- PROMETHEUS ---
   prometheus:
     container_name: ${PROJECT_NAME}-prometheus
@@ -16,22 +76,6 @@ services:
     volumes:
       - ./config/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml
       - ./data/prometheus:/prometheus
-    networks:
-      - kube-devops
-
-  # --- GRAFANA ---
-  grafana:
-    container_name: ${PROJECT_NAME}-grafana
-    image: grafana/grafana
-    user: "1000"
-    ports:
-      - 3000:3000
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWD}
-    volumes:
-      - ./config/grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yml
-      - ./data/grafana:/var/lib/grafana
     networks:
       - kube-devops
 
@@ -86,7 +130,7 @@ services:
       - ./config/loki/loki.yaml:/etc/loki/config.yaml
     depends_on:
       - minio
-      - loki-nginx
+      - nginx
     networks:
       - kube-devops
     healthcheck:
@@ -96,14 +140,16 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- NGINX LOKI ---
-  loki-nginx:
-    container_name: ${PROJECT_NAME}-loki-nginx
+  # --- NGINX ---
+  nginx:
+    container_name: ${PROJECT_NAME}-nginx
     image: nginx:latest
     volumes:
-      - ./config/nginx/loki-nginx.conf:/etc/nginx/nginx.conf
+      - ./config/nginx/infra-nginx.conf:/etc/nginx/nginx.conf
+      - ./config/nginx/html:/var/www/html
     ports:
       - "3100:3100"
+      - "8080:8080"
     networks:
       - kube-devops
     depends_on:
@@ -115,19 +161,18 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- ALLOY ---
-  alloy:
-    image: grafana/alloy:latest
-    volumes:
-      - ./config/alloy/alloy.config:/etc/alloy/config.alloy:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: run --server.http.listen-addr=0.0.0.0:12345 --storage.path=/var/lib/alloy/data /etc/alloy/config.alloy
-    ports:
-      - 12345:12345
-    depends_on:
-      - loki-nginx
-    networks:
-      - kube-devops
+  # --- TEMPO ---
+  # tempo:
+  #   image: grafana/tempo:2.5.0
+  #   container_name: ${PROJECT_NAME}-tempo
+  #   command: ["-config.file=/etc/tempo.yaml"]
+  #   volumes:
+  #     - ./config/tempo.yaml:/etc/tempo.yaml:ro
+  #     - ./data/tempo:/var/tmp/tempo
+  #   ports:
+  #     - "3200:3200"
+  #   networks:
+  #     - kube-devops
 
   # --- MINIO (S3 Compatible Storage) ---
   minio:
@@ -138,7 +183,7 @@ services:
       - -euc
       - |
         mkdir -p /data/loki-data && \
-        mkdir -p /data/loki-ruler &&
+        mkdir -p /data/loki-ruler && \
         minio server --address "0.0.0.0:9000" --console-address "0.0.0.0:9001" /data
     environment:
       - MINIO_ROOT_USER=loki
@@ -158,6 +203,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # --- NODE_EXPORTER ---
+  # node-exporter:
+  #   image: prom/node-exporter:v1.8.2
+  #   container_name: ${PROJECT_NAME}-node-exporter
+  #   volumes:
+  #     - /proc:/host/proc:ro
+  #     - /sys:/host/sys:ro
+  #     - /:/rootfs:ro
+  #   command:
+  #     - "--path.procfs=/host/proc"
+  #     - "--path.sysfs=/host/sys"
+  #     - "--path.rootfs=/rootfs"
+  #   networks:
+  #     - kube-devops
+  #   ports:
+  #     - "9100:9100"
 
   # --- LOG GENERATOR ---
   # for testing purposes only, disable in production

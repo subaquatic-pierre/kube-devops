@@ -1,0 +1,82 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// --- NODE METRICS ---
+prometheus.scrape "node_exporter" {
+  targets 		= [{"__address__" = "node-exporter:9100"}]
+  forward_to 	= [] // Add Prometheus/Mimir remote_write target here later
+}
+
+// --- LOGS (Docker Containers) ---
+discovery.docker "containers" {
+  host 							= "unix:///var/run/docker.sock"
+	refresh_interval 	= "5s"
+}
+
+discovery.relabel "containers" {
+	targets = []
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+}
+
+loki.source.docker "docker_logs" {
+	host						= "unix:///var/run/docker.sock"
+  targets					= discovery.docker.containers.targets
+  forward_to 			= [loki.write.local.receiver]
+	relabel_rules		= discovery.relabel.containers.rules
+}
+
+loki.write "local" {
+  endpoint {
+    url 			= "http://nginx:3100/loki/api/v1/push"
+		tenant_id = "tenant1"
+  }
+	external_labels = {}
+
+}
+
+// --- TRACES (OTLP Receiver) ---
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces  = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+
+
+// loki.source.docker "flog_scrape" {
+// 	host             = "unix:///var/run/docker.sock"
+// 	targets          = discovery.docker.flog_scrape.targets
+// 	forward_to       = [loki.write.default.receiver]
+// 	relabel_rules    = discovery.relabel.flog_scrape.rules
+// 	refresh_interval = "5s"
+// }
+
+// loki.write "default" {
+// 	endpoint {
+// 		url       = "http://nginx:3100/loki/api/v1/push"
+// 		tenant_id = "tenant1"
+// 	}
+// 	external_labels = {}
+// }
