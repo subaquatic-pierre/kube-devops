@@ -1,4 +1,7 @@
----
+# Disable multi-tenancy, ensuring a single tenant for all log streams.
+# auth_enabled: false
+
+# Configuration block for the Loki server.
 server:
   http_listen_address: 0.0.0.0
   http_listen_port: 3100
@@ -12,30 +15,39 @@ memberlist:
   bind_port: 7946
   gossip_interval: 2s
 
+# The schema_config block is used to configure the schema that Loki uses to store log data. Loki allows the use of multiple schemas based on specific time periods. This allows backwards compatibility on schema changes.
 schema_config:
   configs:
     - from: 2023-01-01
       store: tsdb
       object_store: s3
       schema: v13
+      # The index configuration block is used to configure how indexing tables are created and stored. Index tables are the directory that allows Loki to determine which chunks to read when querying for logs.
       index:
         prefix: index_
         period: 24h
+
+# The common block is used to set options for all of the components that make up Loki. These can be overridden using the specific configuration blocks for each component.
 common:
   path_prefix: /loki
   replication_factor: 1
   compactor_address: http://loki-backend:3100
+  # Configuration of the underlying Loki storage system.
   storage:
     s3:
       endpoint: minio:9000
       insecure: true
       bucketnames: loki-data
-      access_key_id: loki
+      access_key_id: minio
       secret_access_key: supersecret
       s3forcepathstyle: true
+
+  # The ring configuration block is used to configure the hash ring that all components use to communicate with each other.
   ring:
     kvstore:
       store: memberlist
+
+# The ruler configuration block to configure the ruler (for recording rules and alerts) in Loki.
 ruler:
   storage:
     s3:
@@ -43,3 +55,16 @@ ruler:
 
 compactor:
   working_directory: /tmp/compactor
+
+# By default, Loki will send anonymous, but uniquely-identifiable usage and configuration
+# analytics to Grafana Labs. These statistics are sent to https://stats.grafana.org/
+#
+# Statistics help us better understand how Loki is used, and they show us performance
+# levels for most users. This helps us prioritize features and documentation.
+# For more information on what's sent, look at
+# https://github.com/grafana/loki/blob/main/pkg/usagestats/stats.go
+# Refer to the buildReport method to see what goes into a report.
+#
+# If you would like to disable reporting, uncomment the following lines:
+#analytics:
+#  reporting_enabled: false

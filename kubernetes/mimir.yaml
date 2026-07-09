@@ -1,0 +1,9 @@
+# Alloy config needed for kubemanifest file
+# hostNetwork: true
+#   hostPID: true
+#   dnsPolicy: ClusterFirstWithHostNet # CRITICAL: Forces the host-networked pod to use CoreDNS
+#   containers:
+#     - name: alloy
+#       image: grafana/alloy:v1.2.1
+#       securityContext:
+#         privileged: true

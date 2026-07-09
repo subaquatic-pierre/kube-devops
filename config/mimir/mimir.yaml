@@ -1,0 +1,72 @@
+# Target is omitted here because it is overridden at runtime via the container CLI flags (-target=read, etc.)
+multitenancy_enabled: false
+
+# Unified storage settings for all Mimir sub-services
+common:
+  storage:
+    backend: s3
+    s3:
+      endpoint: minio:9000
+      insecure: true
+      access_key_id: minio
+      secret_access_key: supersecret
+      s3forcepathstyle: true
+
+blocks_storage:
+  backend: s3
+  s3:
+    bucket_name: mimir-data # Matches the directory initialized in your MinIO entrypoint
+
+ruler_storage:
+  backend: s3
+  s3:
+    bucket_name: mimir-data
+
+# --- MEMBERSHIP & RING COORDINATION ---
+# Enables instances to dynamically discover each other via gossip protocol (Port 7946)
+memberlist:
+  join_members:
+    - mimir-read
+    - mimir-write
+    - mimir-backend
+
+# --- DISTRIBUTOR (Ingestion Entrypoint) ---
+distributor:
+  ring:
+    kvstore:
+      store: memberlist
+
+# --- INGESTER (Stateful metric processing) ---
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: memberlist
+      replication_factor: 1 # Kept at 1 for single-node local testing replicas
+  chunk_idle_period: 1h
+  max_chunk_age: 2h
+  chunk_retain_period: 15m
+
+# --- COMPACTOR (Long-term optimization) ---
+compactor:
+  data_dir: /tmp/mimir/compactor
+  sharding_ring:
+    kvstore:
+      store: memberlist
+
+# --- STORE GATEWAY (Queries historical blocks from S3) ---
+store_gateway:
+  sharding_ring:
+    kvstore:
+      store: memberlist
+    replication_factor: 1
+
+# --- RUNTIME SERVER ---
+server:
+  http_listen_port: 9009
+  grpc_listen_port: 9095
+  log_level: info
+
+limits:
+  max_global_exemplars_per_user: 100000
+  ingestion_rate: 30000

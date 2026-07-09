@@ -6,6 +6,10 @@ services:
   alloy:
     image: grafana/alloy:v1.8.1
     container_name: ${PROJECT_NAME}-alloy
+    user: "0" # Run as root to access host mounts
+    cap_add:
+      - SYS_TIME
+      - SYS_PTRACE
     ports:
       - "12347:12345"
       - "12348:12348"
@@ -15,7 +19,10 @@ services:
       - "4318:4318"
     volumes:
       - ./config/alloy:/etc/alloy
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro # For log/target discovery
     command:
       [
         "run",
@@ -31,6 +38,10 @@ services:
   grafana:
     image: grafana/grafana:11.5.1
     container_name: ${PROJECT_NAME}-grafana
+    volumes:
+      - ./config/grafana/definitions:/var/lib/grafana/dashboards
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./data/grafana:/var/lib/grafana
     user: "1000"
     ports:
       - 3000:3000
@@ -39,47 +50,64 @@ services:
       - GF_INSTALL_PLUGINS=grafana-lokiexplore-app,grafana-exploretraces-app,grafana-pyroscope-app
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWD}
-    volumes:
-      - ./config/grafana/definitions:/var/lib/grafana/dashboards
-      - ./config/grafana/provisioning:/etc/grafana/provisioning
-      - ./data/grafana:/var/lib/grafana
     networks:
       - kube-devops
 
   # --- MIMIR ---
-  # mimir:
-  #   image: grafana/mimir:2.15.0
-  #   command:
-  #     [
-  #       "-ingester.native-histograms-ingestion-enabled=true",
-  #       "-config.file=/etc/mimir.yaml",
-  #     ]
-  #   ports:
-  #     - "9009:9009"
-  #   volumes:
-  #     - "./mimir/mimir.yaml:/etc/mimir.yaml"
-
-  # --- PROMETHEUS ---
-  prometheus:
-    container_name: ${PROJECT_NAME}-prometheus
-    image: prom/prometheus
-    user: "1000"
+  # Horizontally scalable, multi-tenant metric database designed to compress and store Prometheus metrics in cheap object storage like S3.
+  mimir-read:
+    image: grafana/mimir:2.15.0
     command:
       [
-        "--log.level=debug",
-        "--config.file=/etc/prometheus/prometheus.yaml",
-        "--enable-feature=remote-write-receiver",
-        "--query.lookback-delta=30s",
+        "-ingester.native-histograms-ingestion-enabled=true",
+        "-config.file=/etc/mimir.yaml",
+        "-target=read",
       ]
     ports:
-      - 9090:9090
+      - "9011:9009"
     volumes:
-      - ./config/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml
-      - ./data/prometheus:/prometheus
+      - "./mimir/mimir.yaml:/etc/mimir.yaml"
+    depends_on:
+      - minio
+    networks:
+      - kube-devops
+
+  # --- MIMIR WRITE ---
+  mimir-write:
+    image: grafana/mimir:2.15.0
+    command:
+      [
+        "-ingester.native-histograms-ingestion-enabled=true",
+        "-config.file=/etc/mimir.yaml",
+        "-target=write",
+      ]
+    ports:
+      - "9012:9009"
+    volumes:
+      - "./mimir/mimir.yaml:/etc/mimir.yaml"
+    depends_on:
+      - minio
+    networks:
+      - kube-devops
+
+  # --- MIMIR BACKEND (Compactor / Ruler) ---
+  mimir-backend:
+    image: grafana/mimir:2.15.0
+    command:
+      [
+        "-ingester.native-histograms-ingestion-enabled=true",
+        "-config.file=/etc/mimir.yaml",
+        "-target=backend",
+      ]
+    volumes:
+      - "./mimir/mimir.yaml:/etc/mimir.yaml"
+    depends_on:
+      - minio
     networks:
       - kube-devops
 
   # --- LOKI ---
+  # Distributed, read, write and compactor(backend), metadata-indexed log aggregator designed to compress and store raw log streams directly into cheap object storage like S3.
   loki-read:
     image: grafana/loki:latest
     command: "-config.file=/etc/loki/config.yaml -target=read -query-scheduler.use-scheduler-ring=false"
@@ -148,13 +176,16 @@ services:
       - ./config/nginx/infra-nginx.conf:/etc/nginx/nginx.conf
       - ./config/nginx/html:/var/www/html
     ports:
-      - "3100:3100"
+      - "3100:3100" # Loki Traffic
+      - "9009:9009" # Mimir Traffic
       - "8080:8080"
     networks:
       - kube-devops
     depends_on:
       - loki-read
       - loki-write
+      - mimir-read
+      - mimir-write
     healthcheck:
       test: ["CMD", "service", "nginx", "status"]
       interval: 10s
@@ -184,9 +215,10 @@ services:
       - |
         mkdir -p /data/loki-data && \
         mkdir -p /data/loki-ruler && \
+        mkdir -p /data/mimir-data && \
         minio server --address "0.0.0.0:9000" --console-address "0.0.0.0:9001" /data
     environment:
-      - MINIO_ROOT_USER=loki
+      - MINIO_ROOT_USER=minio
       - MINIO_ROOT_PASSWORD=supersecret
       - MINIO_PROMETHEUS_AUTH_TYPE=public
       - MINIO_UPDATE=off
@@ -203,23 +235,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  # --- NODE_EXPORTER ---
-  # node-exporter:
-  #   image: prom/node-exporter:v1.8.2
-  #   container_name: ${PROJECT_NAME}-node-exporter
-  #   volumes:
-  #     - /proc:/host/proc:ro
-  #     - /sys:/host/sys:ro
-  #     - /:/rootfs:ro
-  #   command:
-  #     - "--path.procfs=/host/proc"
-  #     - "--path.sysfs=/host/sys"
-  #     - "--path.rootfs=/rootfs"
-  #   networks:
-  #     - kube-devops
-  #   ports:
-  #     - "9100:9100"
 
   # --- LOG GENERATOR ---
   # for testing purposes only, disable in production
