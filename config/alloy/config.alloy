@@ -6,24 +6,28 @@ logging {
 // --- NODE METRICS ---
 prometheus.exporter.unix "node_metics" { }
 
-// Configure a prometheus.scrape component to collect unix metrics.
 prometheus.scrape "node_metics" {
   targets    = prometheus.exporter.unix.node_metics.targets
   forward_to = [prometheus.remote_write.node_metics.receiver]
 }
 
-prometheus.remote_write "node_metics" {
+// --- ALLOY METRICS ---
+prometheus.exporter.self "alloy_metrics" { }
+
+prometheus.scrape "alloy_scrape" {
+  targets    = prometheus.exporter.self.self_metrics.targets
+  forward_to = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
   endpoint {
     url = "http://nginx:9009"
-
-    basic_auth {
-      username = "<USERNAME>"
-      password = "<PASSWORD>"
-    }
   }
 }
 
-// ---
+// --- END METRICS ---
+
+// --- START LOGS ---
 
 // --- LOGS (Docker Containers) ---
 discovery.docker "containers" {
@@ -44,16 +48,20 @@ discovery.relabel "containers" {
 loki.source.docker "docker_logs" {
 	host						= "unix:///var/run/docker.sock"
   targets					= discovery.docker.containers.targets
-  forward_to 			= [loki.write.local.receiver]
+  forward_to 			= [loki.write.docker_logs.receiver]
 	relabel_rules		= discovery.relabel.containers.rules
 }
 
-loki.write "local" {
+loki.write "docker_logs" {
   endpoint {
     url 			= "http://nginx:3100/loki/api/v1/push"
 		tenant_id = "tenant1"
   }
 }
+
+// --- END LOGS --- 
+
+// --- START TRACING ---
 
 // --- TRACES (OTLP Receiver) ---
 // otelcol.receiver.otlp "default" {
@@ -76,3 +84,9 @@ loki.write "local" {
 //     }
 //   }
 // }
+
+// --- END TRACING ---
+
+// --- START PROFILING ---
+
+// --- END PROFILING ---

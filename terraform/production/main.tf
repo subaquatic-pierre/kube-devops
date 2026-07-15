@@ -18,7 +18,6 @@ provider "aws" {
       Environment = var.env
       Terraform   = true
     }
-
   }
 }
 
